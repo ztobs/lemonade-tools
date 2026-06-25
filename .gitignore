@@ -1,0 +1,11 @@
+# Binary and ROCm libraries (downloaded by install-llama-server.sh)
+bin/
+
+# Secrets
+api-keys
+
+# Runtime artifacts
+llama-server.log
+
+# Backup files
+*.bak

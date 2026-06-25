@@ -1,0 +1,32 @@
+[Unit]
+Description=llama-server (Lemonade ROCm gfx1151) — router mode
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/AI/llama-server
+
+# ROCm environment for Lemonade on gfx1151
+Environment=HSA_OVERRIDE_GFX_VERSION=11.5.1
+Environment=ROCBLAS_USE_HIPBLASLT=1
+Environment=RADV_PERFTEST=bfloat16
+Environment=LD_LIBRARY_PATH=%h/AI/llama-server/bin
+Environment=GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
+
+# Router mode: no -m flag, discovers all GGUFs in models-dir
+# Models load on first API request, LRU eviction when --models-max is hit
+# Per-model params (ctx_size, n_gpu_layers, cache_type, etc.) come from models-preset.ini
+ExecStart=%h/AI/llama-server/bin/llama-server     --models-dir %h/.lmstudio/models     --models-preset %h/AI/llama-server/models-preset.ini     --models-max 1     --host 0.0.0.0     --port 1234     -fa on     --no-mmap     --api-key-file %h/AI/llama-server/api-keys     --jinja --log-file %h/AI/llama-server/llama-server.log
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Write stdout/stderr to journal (in addition to --log-file)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=llama-server
+
+[Install]
+WantedBy=default.target
