@@ -18,7 +18,7 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
 log_setting() { echo -e "${CYAN}  ➜${NC} $*"; }
 
-RELEASE_TAG="b1293"
+RELEASE_TAG="b1302"
 DOWNLOAD_URL="https://github.com/lemonade-sdk/llamacpp-rocm/releases/download/${RELEASE_TAG}/llama-${RELEASE_TAG}-ubuntu-rocm-gfx1151-x64.zip"
 INSTALL_DIR="$HOME/AI/llama-server/bin"
 TMP_DIR="/tmp/lemonade-install-$$"

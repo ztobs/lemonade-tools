@@ -343,6 +343,7 @@ mmproj_interactive() {
         echo
         echo "  [U] Enter a download URL for a new mmproj"
         echo "  [1-${count}] Use an existing mmproj from the list above"
+        echo "  [P] Enter an absolute path to a mmproj file"
         [ -n "$current_mmproj" ] && echo "  [C] Keep current  ($(basename "$current_mmproj"))"
         echo "  [R] Remove mmproj from this config"
         echo "  [S] Skip / no change"
@@ -359,6 +360,17 @@ mmproj_interactive() {
                 ;;
             [Rr]) MMPROJ_PATH="__remove__"; return 0 ;;
             [Uu]) : ;;  # fall through to URL prompt below
+            [Pp])
+                read -p "  mmproj absolute path: " mm_path
+                if [ -z "$mm_path" ]; then
+                    log_info "No path entered — skipping."; MMPROJ_PATH="__skip__"; return 0
+                fi
+                if [ ! -f "$mm_path" ]; then
+                    log_error "File not found: $mm_path"; return 1
+                fi
+                log_success "Set to: $mm_path"
+                MMPROJ_PATH="$mm_path"; return 0
+                ;;
             *)
                 if [[ "$mm_choice" =~ ^[0-9]+$ ]] && [ "$mm_choice" -ge 1 ] && [ "$mm_choice" -le "$count" ]; then
                     MMPROJ_PATH=$(mmproj_path_by_index "$mm_choice")
@@ -373,12 +385,24 @@ mmproj_interactive() {
         log_info "No mmproj files downloaded yet."
         echo
         echo "  [U] Enter a download URL"
+        echo "  [P] Enter an absolute path to a mmproj file"
         echo "  [S] Skip (set up image capability later)"
         echo
         read -p "Choice [S]: " mm_choice
         case "${mm_choice:-S}" in
             [Ss]) MMPROJ_PATH="__skip__"; return 0 ;;
             [Uu]) : ;;
+            [Pp])
+                read -p "  mmproj absolute path: " mm_path
+                if [ -z "$mm_path" ]; then
+                    log_info "No path entered — skipping."; MMPROJ_PATH="__skip__"; return 0
+                fi
+                if [ ! -f "$mm_path" ]; then
+                    log_error "File not found: $mm_path"; return 1
+                fi
+                log_success "Set to: $mm_path"
+                MMPROJ_PATH="$mm_path"; return 0
+                ;;
             *)    MMPROJ_PATH="__skip__"; return 0 ;;
         esac
     fi
@@ -643,14 +667,14 @@ case "$main_choice" in
         # ── thinking mode ──────────────────────────────────────────────────
         echo
         echo "  Thinking/reasoning mode:"
+        echo "    [3] auto — let model/client decide (recommended default)"
         echo "    [1] off  — non-thinking instruct mode (recommended for Qwen3.5 large)"
         echo "    [2] on   — full thinking/CoT mode"
-        echo "    [3] auto — let model/client decide (llama-server default)"
-        read -p "  Choice [1]: " think_choice
-        case "${think_choice:-1}" in
+        read -p "  Choice [3]: " think_choice
+        case "${think_choice:-3}" in
+            1) thinking_mode="off" ;;
             2) thinking_mode="on" ;;
-            3) thinking_mode="auto" ;;
-            *) thinking_mode="off" ;;
+            *) thinking_mode="auto" ;;
         esac
 
         # Set inference param defaults based on thinking mode
@@ -686,14 +710,73 @@ case "$main_choice" in
         # auto: no reasoning-budget or chat-template-kwargs set (use server defaults)
 
         # ── mmproj / image capability ──────────────────────────────────────
-        mmproj_interactive ""
+        # Auto-detect mmproj in model's own directory
+        local_mmproj=""
+        if [ -n "$model_path" ]; then
+            model_dir=$(dirname "$model_path")
+            local_mmproj=$(find "$model_dir" -maxdepth 1 -type f -name "mmproj*.gguf" 2>/dev/null | head -1)
+        fi
+        if [ -n "$local_mmproj" ]; then
+            echo
+            log_info "Found mmproj in model directory: $(basename "$local_mmproj")"
+            read -p "  Use this? [Y/n]: " use_local
+            if [ "${use_local:-Y}" != "n" ] && [ "${use_local:-Y}" != "N" ]; then
+                MMPROJ_PATH="$local_mmproj"
+            else
+                mmproj_interactive ""
+            fi
+        else
+            mmproj_interactive ""
+        fi
         case "$MMPROJ_PATH" in
             __skip__|"") : ;;   # user skipped — no mmproj key written
+            __remove__)
+                ini_delete_key "$INI_FILE" "$section" "mmproj"
+                ;;
             *)
                 ini_set "$INI_FILE" "$section" "mmproj" "$MMPROJ_PATH"
                 log_success "mmproj set to: $MMPROJ_PATH"
                 ;;
         esac
+
+        # ── speculative decoding ───────────────────────────────────────────
+        echo
+        log_header "Speculative Decoding"
+        echo
+        echo "  Types that work on ANY model (no extra files needed):"
+        echo "    ngram-simple  — n-gram pattern matching"
+        echo
+        echo "  Types that need MTP heads built into the model:"
+        echo "    draft-mtp     — Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, Hy3"
+        echo
+        echo "  Types that need a separate draft model file:"
+        echo "    draft-eagle3  — EAGLE3 head (best quality)"
+        echo "    draft-simple  — small standalone draft model"
+        echo
+        read -p "  Enable? Enter type or leave blank to skip: " spec_type
+        if [ -n "$spec_type" ]; then
+            ini_set "$INI_FILE" "$section" "spec-type" "$spec_type"
+            read -p "  spec-draft-n-max (default: 16): " v
+            ini_set "$INI_FILE" "$section" "spec-draft-n-max" "${v:-16}"
+            read -p "  draft-p-min (default: 0.75): " v
+            ini_set "$INI_FILE" "$section" "draft-p-min" "${v:-0.75}"
+            if [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ]; then
+                draft_interactive ""
+                case "$DRAFT_PATH" in
+                    __skip__|"")
+                        log_warning "No draft model set — spec decoding may not work."
+                        ;;
+                    __remove__)
+                        : ;;
+                    *)
+                        ini_set "$INI_FILE" "$section" "model-draft" "$DRAFT_PATH"
+                        log_success "Draft model set to: $DRAFT_PATH"
+                        ;;
+                esac
+            fi
+        else
+            log_info "Skipped — can add later via llm_config > option 6"
+        fi
 
         echo
         log_success "Config created for: $section"
@@ -1093,7 +1176,7 @@ PY
         echo "  WARNING: 'draft-mtp' will CRASH the server if the model lacks MTP heads!"
         echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+)"
         echo
-        read -p "  spec-type        (blank=keep/remove) [${spc:-(not set)}]: " v
+        read -p "  spec-type (blank=keep, 'none' to clear) [${spc:-(not set)}]: " v
         if [ -n "$v" ]; then
             if [ "$v" = "none" ]; then
                 python3 - "$INI_FILE" "$section" << 'PY'
