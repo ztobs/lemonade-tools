@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install llama-server from Lemonade SDK (ROCm gfx1151 pre-built binaries)
-# Lemonade release b1220 — bundles its own ROCm 7 runtime, no system ROCm needed
+# Lemonade release b1321 — bundles its own ROCm 10.1 runtime, no system ROCm needed
 # Binary is labeled "ubuntu" but is standard Linux ELF (glibc 2.39+); works on Fedora 43 (glibc 2.43)
 
 set -e
@@ -18,7 +18,7 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
 log_setting() { echo -e "${CYAN}  ➜${NC} $*"; }
 
-RELEASE_TAG="b1302"
+RELEASE_TAG="b1321"
 DOWNLOAD_URL="https://github.com/lemonade-sdk/llamacpp-rocm/releases/download/${RELEASE_TAG}/llama-${RELEASE_TAG}-ubuntu-rocm-gfx1151-x64.zip"
 INSTALL_DIR="$HOME/AI/llama-server/bin"
 TMP_DIR="/tmp/lemonade-install-$$"

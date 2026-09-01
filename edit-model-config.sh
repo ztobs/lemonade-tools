@@ -136,6 +136,31 @@ with open(f, "w") as fh:
 PY
 }
 
+reasoning_mode_apply() {
+    # reasoning_mode_apply FILE SECTION MODE
+    # MODE: off | default | minimal | low | medium | high | xhigh | max
+    python3 - "$@" << 'PY'
+import sys, configparser
+f, sec, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+c = configparser.ConfigParser()
+c.read(f)
+if not c.has_section(sec):
+    c.add_section(sec)
+for k in ["reasoning", "reasoning-effort", "reasoning-budget", "chat-template-kwargs"]:
+    if c.has_option(sec, k):
+        c.remove_option(sec, k)
+if mode == "off":
+    c.set(sec, "reasoning", "off")
+elif mode == "default":
+    c.set(sec, "reasoning", "auto")
+else:
+    c.set(sec, "reasoning", "on")
+    c.set(sec, "reasoning-effort", mode)
+with open(f, "w") as fh:
+    c.write(fh)
+PY
+}
+
 ini_list_sections() {
     python3 - "$1" << 'PY'
 import sys, configparser
@@ -667,14 +692,24 @@ case "$main_choice" in
         # ── thinking mode ──────────────────────────────────────────────────
         echo
         echo "  Thinking/reasoning mode:"
-        echo "    [3] auto — let model/client decide (recommended default)"
-        echo "    [1] off  — non-thinking instruct mode (recommended for Qwen3.5 large)"
-        echo "    [2] on   — full thinking/CoT mode"
-        read -p "  Choice [3]: " think_choice
-        case "${think_choice:-3}" in
+        echo "    [2] default — model/template default (auto-detect) [recommended]"
+        echo "    [1] off     — disable thinking/reasoning"
+        echo "    [3] minimal — thinking on, minimal effort"
+        echo "    [4] low     — thinking on, low effort"
+        echo "    [5] medium  — thinking on, medium effort"
+        echo "    [6] high    — thinking on, high effort"
+        echo "    [7] xhigh   — thinking on, extra-high effort"
+        echo "    [8] max     — thinking on, maximum effort"
+        read -p "  Choice [2]: " think_choice
+        case "${think_choice:-2}" in
             1) thinking_mode="off" ;;
-            2) thinking_mode="on" ;;
-            *) thinking_mode="auto" ;;
+            3) thinking_mode="minimal" ;;
+            4) thinking_mode="low" ;;
+            5) thinking_mode="medium" ;;
+            6) thinking_mode="high" ;;
+            7) thinking_mode="xhigh" ;;
+            8) thinking_mode="max" ;;
+            *) thinking_mode="default" ;;
         esac
 
         # Set inference param defaults based on thinking mode
@@ -698,16 +733,8 @@ case "$main_choice" in
         read -p "  presence-penalty (default: $def_presence): " v; ini_set "$INI_FILE" "$section" "presence-penalty" "${v:-$def_presence}"
         read -p "  repeat-penalty (default: $def_repeat): " v; ini_set "$INI_FILE" "$section" "repeat-penalty" "${v:-$def_repeat}"
 
-        # Write reasoning params
-        ini_set "$INI_FILE" "$section" "reasoning" "$thinking_mode"
-        if [ "$thinking_mode" = "off" ]; then
-            ini_set "$INI_FILE" "$section" "reasoning-budget"      "0"
-            ini_set "$INI_FILE" "$section" "chat-template-kwargs"  "{\"enable_thinking\": false}"
-        elif [ "$thinking_mode" = "on" ]; then
-            ini_set "$INI_FILE" "$section" "reasoning-budget"      "-1"
-            ini_set "$INI_FILE" "$section" "chat-template-kwargs"  "{\"enable_thinking\": true}"
-        fi
-        # auto: no reasoning-budget or chat-template-kwargs set (use server defaults)
+        # Write reasoning params (off / default / low / medium / high / max)
+        reasoning_mode_apply "$INI_FILE" "$section" "$thinking_mode"
 
         # ── mmproj / image capability ──────────────────────────────────────
         # Auto-detect mmproj in model's own directory
@@ -758,6 +785,8 @@ case "$main_choice" in
             ini_set "$INI_FILE" "$section" "spec-type" "$spec_type"
             read -p "  spec-draft-n-max (default: 16): " v
             ini_set "$INI_FILE" "$section" "spec-draft-n-max" "${v:-16}"
+            read -p "  spec-draft-n-min (default: 2): " v
+            ini_set "$INI_FILE" "$section" "spec-draft-n-min" "${v:-2}"
             read -p "  draft-p-min (default: 0.75): " v
             ini_set "$INI_FILE" "$section" "draft-p-min" "${v:-0.75}"
             if [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ]; then
@@ -979,11 +1008,13 @@ pre=$(ini_get "$INI_FILE" "$section" "presence-penalty"    "0.0")
 rep=$(ini_get "$INI_FILE" "$section" "repeat-penalty"      "1.05")
 rea=$(ini_get "$INI_FILE" "$section" "reasoning"           "")
 reb=$(ini_get "$INI_FILE" "$section" "reasoning-budget"    "")
+ree=$(ini_get "$INI_FILE" "$section" "reasoning-effort"    "")
 ctk_kwargs=$(ini_get "$INI_FILE" "$section" "chat-template-kwargs" "")
 mmp=$(ini_get "$INI_FILE" "$section" "mmproj"              "")
 spc=$(ini_get "$INI_FILE" "$section" "spec-type"          "")
 spn=$(ini_get "$INI_FILE" "$section" "spec-draft-n-max"   "16")
 dpm=$(ini_get "$INI_FILE" "$section" "draft-p-min"        "0.75")
+spnmin=$(ini_get "$INI_FILE" "$section" "spec-draft-n-min" "0")
 mdr=$(ini_get "$INI_FILE" "$section" "model-draft"         "")
 
 # Compute size — prefer model= path, fall back to key-based scan
@@ -1012,6 +1043,7 @@ log_setting "repeat-penalty:        $rep"
 echo
 echo "THINKING / REASONING:"
 log_setting "reasoning:             ${rea:-(not set — server default: auto)}"
+log_setting "reasoning-effort:      ${ree:-(not set)}"
 log_setting "reasoning-budget:      ${reb:-(not set)}"
 log_setting "chat-template-kwargs:  ${ctk_kwargs:-(not set)}"
 echo
@@ -1023,6 +1055,7 @@ echo
 echo "SPECULATIVE DECODING:"
 log_setting "spec-type:             ${spc:-(not set)}"
 log_setting "spec-draft-n-max:      ${spn:-(not set)}"
+log_setting "spec-draft-n-min:      ${spnmin:-(not set)}"
 log_setting "draft-p-min:           ${dpm:-(not set)}"
 log_setting "model-draft:           ${mdr:-(not set)}"
 echo "═══════════════════════════════════════════════════════════"
@@ -1088,44 +1121,34 @@ case "$edit_choice" in
         echo
         log_header "Edit Thinking / Reasoning"
         echo
-        echo "  Current: reasoning=${rea:-(not set)}, reasoning-budget=${reb:-(not set)}"
-        echo "  Presets:"
-        echo "    [1] off  — disable thinking  (reasoning=off, budget=0, enable_thinking:false)"
-        echo "    [2] on   — enable thinking   (reasoning=on,  budget=-1, enable_thinking:true)"
-        echo "    [3] auto — server default     (clears all reasoning params)"
-        echo "    [4] manual — set values individually"
-        read -p "  Choice [4]: " rthink_choice
-        case "${rthink_choice:-4}" in
-            1)
-                ini_set "$INI_FILE" "$section" "reasoning"             "off"
-                ini_set "$INI_FILE" "$section" "reasoning-budget"      "0"
-                ini_set "$INI_FILE" "$section" "chat-template-kwargs"  "{\"enable_thinking\": false}"
-                log_success "Thinking disabled."
-                ;;
-            2)
-                ini_set "$INI_FILE" "$section" "reasoning"             "on"
-                ini_set "$INI_FILE" "$section" "reasoning-budget"      "-1"
-                ini_set "$INI_FILE" "$section" "chat-template-kwargs"  "{\"enable_thinking\": true}"
-                log_success "Thinking enabled."
-                ;;
-            3)
-                python3 - "$INI_FILE" "$section" << 'PY'
-import sys, configparser
-f, sec = sys.argv[1], sys.argv[2]
-c = configparser.ConfigParser()
-c.read(f)
-for k in ["reasoning", "reasoning-budget", "chat-template-kwargs"]:
-    if c.has_section(sec) and k in c[sec]:
-        del c[sec][k]
-with open(f, "w") as fh:
-    c.write(fh)
-print("Reasoning params cleared.")
-PY
-                ;;
-            4)
+        echo "  Current: reasoning=${rea:-(not set)}, reasoning-effort=${ree:-(not set)}"
+        echo
+        echo "  Reasoning modes:"
+        echo "    [1] off     — disable thinking/reasoning"
+        echo "    [2] default — model/template default (auto-detect)"
+        echo "    [3] minimal — thinking on, minimal effort"
+        echo "    [4] low     — thinking on, low effort"
+        echo "    [5] medium  — thinking on, medium effort"
+        echo "    [6] high    — thinking on, high effort"
+        echo "    [7] xhigh   — thinking on, extra-high effort"
+        echo "    [8] max     — thinking on, maximum effort"
+        echo "    [9] manual  — set values individually"
+        read -p "  Choice [9]: " rthink_choice
+        case "${rthink_choice:-9}" in
+            1) reasoning_mode_apply "$INI_FILE" "$section" "off";     log_success "Thinking disabled (reasoning=off)." ;;
+            2) reasoning_mode_apply "$INI_FILE" "$section" "default"; log_success "Reasoning reset to default (auto)." ;;
+            3) reasoning_mode_apply "$INI_FILE" "$section" "minimal"; log_success "Thinking on, minimal effort." ;;
+            4) reasoning_mode_apply "$INI_FILE" "$section" "low";     log_success "Thinking on, low effort." ;;
+            5) reasoning_mode_apply "$INI_FILE" "$section" "medium";  log_success "Thinking on, medium effort." ;;
+            6) reasoning_mode_apply "$INI_FILE" "$section" "high";    log_success "Thinking on, high effort." ;;
+            7) reasoning_mode_apply "$INI_FILE" "$section" "xhigh";   log_success "Thinking on, extra-high effort." ;;
+            8) reasoning_mode_apply "$INI_FILE" "$section" "max";     log_success "Thinking on, maximum effort." ;;
+            9)
                 echo
-                read -p "  reasoning      (on/off/auto, blank=keep) [${rea:-(not set)}]: " v
+                read -p "  reasoning        (on/off/auto, blank=keep) [${rea:-(not set)}]: " v
                 [ -n "$v" ] && ini_set "$INI_FILE" "$section" "reasoning" "$v"
+                read -p "  reasoning-effort (default/minimal/low/medium/high/xhigh/max, blank=keep) [${ree:-(not set)}]: " v
+                [ -n "$v" ] && ini_set "$INI_FILE" "$section" "reasoning-effort" "$v"
                 read -p "  reasoning-budget (-1=unlimited, 0=disable, blank=keep) [${reb:-(not set)}]: " v
                 [ -n "$v" ] && ini_set "$INI_FILE" "$section" "reasoning-budget" "$v"
                 read -p "  chat-template-kwargs (blank=keep) [${ctk_kwargs:-(not set)}]: " v
@@ -1157,7 +1180,7 @@ PY
         echo
         log_header "Edit Speculative Decoding"
         echo
-        echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, draft-p-min=${dpm:-(not set)}"
+        echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, spec-draft-n-min=${spnmin:-(not set)}, draft-p-min=${dpm:-(not set)}"
         echo
         echo "  Spec type options (no draft model needed):"
         echo "    ngram-simple  — n-gram pattern matching (works on ANY model)"
@@ -1184,7 +1207,7 @@ import sys, configparser
 f, sec = sys.argv[1], sys.argv[2]
 c = configparser.ConfigParser()
 c.read(f)
-for k in ["spec-type", "spec-draft-n-max", "draft-p-min"]:
+for k in ["spec-type", "spec-draft-n-max", "spec-draft-n-min", "draft-p-min"]:
     if c.has_section(sec) and k in c[sec]:
         del c[sec][k]
 with open(f, "w") as fh:
@@ -1198,6 +1221,8 @@ PY
         if [ "$v" != "none" ]; then
             read -p "  spec-draft-n-max (blank=keep)  [${spn:-(not set)}]: " v
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-n-max" "$v"
+            read -p "  spec-draft-n-min (blank=keep)  [${spnmin:-(not set)}]: " v
+            [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-n-min" "$v"
             read -p "  draft-p-min      (blank=keep)  [${dpm:-(not set)}]: " v
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-min" "$v"
             
@@ -1214,6 +1239,7 @@ PY
                             log_warning "Reverting spec-type to avoid broken config."
                             ini_delete_key "$INI_FILE" "$section" "spec-type"
                             ini_delete_key "$INI_FILE" "$section" "spec-draft-n-max"
+                            ini_delete_key "$INI_FILE" "$section" "spec-draft-n-min"
                             ini_delete_key "$INI_FILE" "$section" "draft-p-min"
                             log_info "Speculative decoding reverted. Run again with a draft model URL."
                         else

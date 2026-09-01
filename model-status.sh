@@ -12,6 +12,11 @@ NC='\033[0m'
 LOG_FILE="$HOME/AI/llama-server/llama-server.log"
 SERVER_HOST="127.0.0.1"
 SERVER_PORT=1234
+API_KEY_FILE="$HOME/AI/llama-server/api-keys"
+API_KEY=""
+[ -f "$API_KEY_FILE" ] && API_KEY=$(head -1 "$API_KEY_FILE" | tr -d "[:space:]")
+AUTH=()
+[ -n "$API_KEY" ] && AUTH=(-H "Authorization: Bearer $API_KEY")
 
 echo "════════════════════════════════════════════════════════════"
 echo "  llama-server Model Status"
@@ -53,7 +58,7 @@ echo
 
 # ── health endpoint ───────────────────────────────────────────────────────────
 
-health_json=$(curl -sf "http://${SERVER_HOST}:${SERVER_PORT}/health" 2>/dev/null || echo "")
+health_json=$(curl -sf "${AUTH[@]}" "http://${SERVER_HOST}:${SERVER_PORT}/health" 2>/dev/null || echo "")
 
 if [ -z "$health_json" ]; then
     echo -e "  Health:  ${YELLOW}UNREACHABLE${NC} (server process running but not responding yet)"
@@ -74,7 +79,7 @@ esac
 
 # ── models endpoint ───────────────────────────────────────────────────────────
 
-models_json=$(curl -sf "http://${SERVER_HOST}:${SERVER_PORT}/v1/models" 2>/dev/null || echo "")
+models_json=$(curl -sf "${AUTH[@]}" "http://${SERVER_HOST}:${SERVER_PORT}/v1/models" 2>/dev/null || echo "")
 
 if [ -z "$models_json" ]; then
     echo
