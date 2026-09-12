@@ -11,7 +11,6 @@ Environment=HSA_OVERRIDE_GFX_VERSION=11.5.1
 Environment=ROCBLAS_USE_HIPBLASLT=1
 Environment=RADV_PERFTEST=bfloat16
 Environment=LD_LIBRARY_PATH=%h/AI/llama-server/bin
-Environment=GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
 
 # Router mode: no -m flag, discovers all GGUFs in models-dir
 # Models load on first API request, LRU eviction when --models-max is hit

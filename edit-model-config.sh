@@ -11,6 +11,8 @@
 # cache-type-k   = q8_0
 # cache-type-v   = q8_0
 # threads        =          (blank = auto)
+# ubatch-size    =          (blank = llama.cpp standard default 512;
+#                             Qwen3.8-Flash-Next: 2048 or lower to avoid garbled output)
 # temperature    = 0.7
 # top-k          = 40
 # top-p          = 0.95
@@ -1000,6 +1002,7 @@ ngl=$(ini_get "$INI_FILE" "$section" "n-gpu-layers"        "999")
 par=$(ini_get "$INI_FILE" "$section" "parallel"            "1")
 ctk=$(ini_get "$INI_FILE" "$section" "cache-type-k"        "q8_0")
 ctv=$(ini_get "$INI_FILE" "$section" "cache-type-v"        "q8_0")
+ubt=$(ini_get "$INI_FILE" "$section" "ubatch-size"         "512")
 tmp=$(ini_get "$INI_FILE" "$section" "temperature"         "0.7")
 tok=$(ini_get "$INI_FILE" "$section" "top-k"               "40")
 top=$(ini_get "$INI_FILE" "$section" "top-p"               "0.95")
@@ -1032,6 +1035,7 @@ log_setting "n-gpu-layers:          $ngl"
 log_setting "parallel:              $par"
 log_setting "cache-type-k:          $ctk"
 log_setting "cache-type-v:          $ctv"
+log_setting "ubatch-size:           $ubt  (unset = llama.cpp default 512)"
 echo
 echo "INFERENCE PARAMETERS:"
 log_setting "temperature:           $tmp"
@@ -1062,7 +1066,7 @@ echo "════════════════════════�
 echo
 
 echo "What would you like to edit?"
-echo "  [1] Loading Parameters (ctx, ngl, parallel, cache-type)"
+echo "  [1] Loading Parameters (ctx, ngl, parallel, cache-type, ubatch-size)"
 echo "  [2] Inference Parameters (temperature, top-k, top-p, min-p, presence, repeat)"
 echo "  [3] Rename section (API model alias)"
 echo "  [4] Thinking / Reasoning"
@@ -1082,6 +1086,10 @@ case "$edit_choice" in
         read -p "  parallel     [$par]: "               v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "parallel"     "$v"
         read -p "  cache-type-k [$ctk]: "               v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "cache-type-k" "$v"
         read -p "  cache-type-v [$ctv]: "               v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "cache-type-v" "$v"
+        echo
+        log_info "Note: Qwen3.8-Flash-Next → set ubatch-size to 2048 or lower"
+        log_info "      (large ubatch triggers a known garbled-output bug on this model)."
+        read -p "  ubatch-size   [$ubt]: "               v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "ubatch-size" "$v"
         log_success "Loading parameters updated!"
         ;;
     2)
