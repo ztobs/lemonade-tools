@@ -781,6 +781,8 @@ case "$main_choice" in
         echo "  Types that need a separate draft model file:"
         echo "    draft-eagle3  — EAGLE3 head (best quality)"
         echo "    draft-simple  — small standalone draft model"
+        echo "    draft-dflash  — block-diffusion drafting (DFlash, experimental)"
+        echo "    draft-dspark  — Markov-head drafting (DSpark, experimental)"
         echo
         read -p "  Enable? Enter type or leave blank to skip: " spec_type
         if [ -n "$spec_type" ]; then
@@ -791,7 +793,7 @@ case "$main_choice" in
             ini_set "$INI_FILE" "$section" "spec-draft-n-min" "${v:-2}"
             read -p "  draft-p-min (default: 0.75): " v
             ini_set "$INI_FILE" "$section" "draft-p-min" "${v:-0.75}"
-            if [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ]; then
+            if [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ] || [ "$spec_type" = "draft-dflash" ] || [ "$spec_type" = "draft-dspark" ]; then
                 draft_interactive ""
                 case "$DRAFT_PATH" in
                     __skip__|"")
@@ -1003,6 +1005,8 @@ par=$(ini_get "$INI_FILE" "$section" "parallel"            "1")
 ctk=$(ini_get "$INI_FILE" "$section" "cache-type-k"        "q8_0")
 ctv=$(ini_get "$INI_FILE" "$section" "cache-type-v"        "q8_0")
 ubt=$(ini_get "$INI_FILE" "$section" "ubatch-size"         "512")
+lzm=$(ini_get "$INI_FILE" "$section" "lazy-mode"           "")
+fa=$(ini_get "$INI_FILE" "$section" "flash-attn"           "")
 tmp=$(ini_get "$INI_FILE" "$section" "temperature"         "0.7")
 tok=$(ini_get "$INI_FILE" "$section" "top-k"               "40")
 top=$(ini_get "$INI_FILE" "$section" "top-p"               "0.95")
@@ -1019,6 +1023,7 @@ spn=$(ini_get "$INI_FILE" "$section" "spec-draft-n-max"   "16")
 dpm=$(ini_get "$INI_FILE" "$section" "draft-p-min"        "0.75")
 spnmin=$(ini_get "$INI_FILE" "$section" "spec-draft-n-min" "0")
 mdr=$(ini_get "$INI_FILE" "$section" "model-draft"         "")
+dps=$(ini_get "$INI_FILE" "$section" "draft-p-split"       "0.10")
 
 # Compute size — prefer model= path, fall back to key-based scan
 if [ -n "$mdl" ]; then
@@ -1036,6 +1041,8 @@ log_setting "parallel:              $par"
 log_setting "cache-type-k:          $ctk"
 log_setting "cache-type-v:          $ctv"
 log_setting "ubatch-size:           $ubt  (unset = llama.cpp default 512)"
+log_setting "lazy-mode:             ${lzm:-(unset = auto; disabled on iGPU)}"
+log_setting "flash-attn:            ${fa:-(unset — server default: on)}"
 echo
 echo "INFERENCE PARAMETERS:"
 log_setting "temperature:           $tmp"
@@ -1061,17 +1068,18 @@ log_setting "spec-type:             ${spc:-(not set)}"
 log_setting "spec-draft-n-max:      ${spn:-(not set)}"
 log_setting "spec-draft-n-min:      ${spnmin:-(not set)}"
 log_setting "draft-p-min:           ${dpm:-(not set)}"
+log_setting "draft-p-split:         ${dps:-(unset — default 0.10)}"
 log_setting "model-draft:           ${mdr:-(not set)}"
 echo "═══════════════════════════════════════════════════════════"
 echo
 
 echo "What would you like to edit?"
-echo "  [1] Loading Parameters (ctx, ngl, parallel, cache-type, ubatch-size)"
+echo "  [1] Loading Parameters (ctx, ngl, parallel, cache-type, ubatch-size, lazy-mode, flash-attn)"
 echo "  [2] Inference Parameters (temperature, top-k, top-p, min-p, presence, repeat)"
 echo "  [3] Rename section (API model alias)"
 echo "  [4] Thinking / Reasoning"
 echo "  [5] Image / Vision (mmproj)"
-echo "  [6] Speculative Decoding (spec-type, draft-max, draft-p-min)"
+echo "  [6] Speculative Decoding (spec-type, draft-max, draft-p-min, draft-p-split)"
 echo "  [q] Quit"
 read -p "Choice: " edit_choice
 
@@ -1090,6 +1098,8 @@ case "$edit_choice" in
         log_info "Note: Qwen3.8-Flash-Next → set ubatch-size to 2048 or lower"
         log_info "      (large ubatch triggers a known garbled-output bug on this model)."
         read -p "  ubatch-size   [$ubt]: "               v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "ubatch-size" "$v"
+        read -p "  lazy-mode     [$lzm]: "               v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "lazy-mode" "$v"
+        read -p "  flash-attn (on/off/auto) [$fa]: "    v; [ -n "$v" ] && ini_set "$INI_FILE" "$section" "flash-attn" "$v"
         log_success "Loading parameters updated!"
         ;;
     2)
@@ -1188,7 +1198,7 @@ case "$edit_choice" in
         echo
         log_header "Edit Speculative Decoding"
         echo
-        echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, spec-draft-n-min=${spnmin:-(not set)}, draft-p-min=${dpm:-(not set)}"
+        echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, spec-draft-n-min=${spnmin:-(not set)}, draft-p-min=${dpm:-(not set)}, draft-p-split=${dps:-(not set)}"
         echo
         echo "  Spec type options (no draft model needed):"
         echo "    ngram-simple  — n-gram pattern matching (works on ANY model)"
@@ -1202,7 +1212,9 @@ case "$edit_choice" in
         echo
         echo "  Spec type options (needs separate draft model via model-draft=):"
         echo "    draft-simple  — small standalone draft model"
-        echo "    draft-eagle3  — EAGLE3 head draft model (best quality, needs b1293+)"
+        echo "    draft-eagle3  — EAGLE3 head draft model (best quality)"
+        echo "    draft-dflash  — block-diffusion drafting (DFlash, experimental)"
+        echo "    draft-dspark  — Markov-head drafting (DSpark, experimental)"
         echo
         echo "  WARNING: 'draft-mtp' will CRASH the server if the model lacks MTP heads!"
         echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+)"
@@ -1215,7 +1227,7 @@ import sys, configparser
 f, sec = sys.argv[1], sys.argv[2]
 c = configparser.ConfigParser()
 c.read(f)
-for k in ["spec-type", "spec-draft-n-max", "spec-draft-n-min", "draft-p-min"]:
+for k in ["spec-type", "spec-draft-n-max", "spec-draft-n-min", "draft-p-min", "draft-p-split", "model-draft"]:
     if c.has_section(sec) and k in c[sec]:
         del c[sec][k]
 with open(f, "w") as fh:
@@ -1233,10 +1245,12 @@ PY
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-n-min" "$v"
             read -p "  draft-p-min      (blank=keep)  [${dpm:-(not set)}]: " v
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-min" "$v"
+            read -p "  draft-p-split    (blank=keep)  [${dps:-(not set)}]: " v
+            [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-split" "$v"
             
             # If draft-eagle3 or draft-simple, offer to download/select a draft model
             current_spec=$(ini_get "$INI_FILE" "$section" "spec-type" "")
-            if [ "$current_spec" = "draft-eagle3" ] || [ "$current_spec" = "draft-simple" ]; then
+            if [ "$current_spec" = "draft-eagle3" ] || [ "$current_spec" = "draft-simple" ] || [ "$current_spec" = "draft-dflash" ] || [ "$current_spec" = "draft-dspark" ]; then
                 draft_interactive "$mdr"
                 case "$DRAFT_PATH" in
                     __skip__)
@@ -1249,6 +1263,7 @@ PY
                             ini_delete_key "$INI_FILE" "$section" "spec-draft-n-max"
                             ini_delete_key "$INI_FILE" "$section" "spec-draft-n-min"
                             ini_delete_key "$INI_FILE" "$section" "draft-p-min"
+                            ini_delete_key "$INI_FILE" "$section" "draft-p-split"
                             log_info "Speculative decoding reverted. Run again with a draft model URL."
                         else
                             log_info "Keeping existing model-draft: $existing_mdr"
