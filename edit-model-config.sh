@@ -1024,6 +1024,7 @@ dpm=$(ini_get "$INI_FILE" "$section" "draft-p-min"        "0.75")
 spnmin=$(ini_get "$INI_FILE" "$section" "spec-draft-n-min" "0")
 mdr=$(ini_get "$INI_FILE" "$section" "model-draft"         "")
 dps=$(ini_get "$INI_FILE" "$section" "draft-p-split"       "0.10")
+sam=$(ini_get "$INI_FILE" "$section" "spec-draft-sampling" "")
 
 # Compute size — prefer model= path, fall back to key-based scan
 if [ -n "$mdl" ]; then
@@ -1069,6 +1070,7 @@ log_setting "spec-draft-n-max:      ${spn:-(not set)}"
 log_setting "spec-draft-n-min:      ${spnmin:-(not set)}"
 log_setting "draft-p-min:           ${dpm:-(not set)}"
 log_setting "draft-p-split:         ${dps:-(unset — default 0.10)}"
+log_setting "spec-draft-sampling:   ${sam:-(unset — default greedy)}"
 log_setting "model-draft:           ${mdr:-(not set)}"
 echo "═══════════════════════════════════════════════════════════"
 echo
@@ -1198,7 +1200,7 @@ case "$edit_choice" in
         echo
         log_header "Edit Speculative Decoding"
         echo
-        echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, spec-draft-n-min=${spnmin:-(not set)}, draft-p-min=${dpm:-(not set)}, draft-p-split=${dps:-(not set)}"
+        echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, spec-draft-n-min=${spnmin:-(not set)}, draft-p-min=${dpm:-(not set)}, draft-p-split=${dps:-(not set)}, spec-draft-sampling=${sam:-(not set)}"
         echo
         echo "  Spec type options (no draft model needed):"
         echo "    ngram-simple  — n-gram pattern matching (works on ANY model)"
@@ -1208,7 +1210,7 @@ case "$edit_choice" in
         echo "    ngram-cache   — n-gram cache variant"
         echo
         echo "  Spec type options (needs MTP head in model — no draft file):"
-        echo "    draft-mtp     — Multi-Token Prediction (Qwen3.6, Qwopus, Gemma4, Step3.5/3.7, GLM-4.5/4.6)"
+        echo "    draft-mtp     — Multi-Token Prediction (Qwen3.6, Qwopus, Gemma4, Step3.5/3.7, GLM-4.5/4.6, GLM-5.3-Flash, Qwen3.8-Flash-Next)"
         echo
         echo "  Spec type options (needs separate draft model via model-draft=):"
         echo "    draft-simple  — small standalone draft model"
@@ -1217,7 +1219,7 @@ case "$edit_choice" in
         echo "    draft-dspark  — Markov-head drafting (DSpark, experimental)"
         echo
         echo "  WARNING: 'draft-mtp' will CRASH the server if the model lacks MTP heads!"
-        echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+)"
+        echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, GLM-5.3-Flash, Qwen3.8-Flash-Next)"
         echo
         read -p "  spec-type (blank=keep, 'none' to clear) [${spc:-(not set)}]: " v
         if [ -n "$v" ]; then
@@ -1227,7 +1229,7 @@ import sys, configparser
 f, sec = sys.argv[1], sys.argv[2]
 c = configparser.ConfigParser()
 c.read(f)
-for k in ["spec-type", "spec-draft-n-max", "spec-draft-n-min", "draft-p-min", "draft-p-split", "model-draft"]:
+for k in ["spec-type", "spec-draft-n-max", "spec-draft-n-min", "draft-p-min", "draft-p-split", "spec-draft-sampling", "model-draft"]:
     if c.has_section(sec) and k in c[sec]:
         del c[sec][k]
 with open(f, "w") as fh:
@@ -1247,6 +1249,10 @@ PY
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-min" "$v"
             read -p "  draft-p-split    (blank=keep)  [${dps:-(not set)}]: " v
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-split" "$v"
+            echo "    spec-draft-sampling: greedy (argmax) or probabilistic (sample + rejection verify)"
+            echo "    Applies to draft-simple and draft-mtp. Default: greedy."
+            read -p "  spec-draft-sampling (greedy/probabilistic, blank=keep) [${sam:-(not set)}]: " v
+            [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-sampling" "$v"
             
             # If draft-eagle3 or draft-simple, offer to download/select a draft model
             current_spec=$(ini_get "$INI_FILE" "$section" "spec-type" "")

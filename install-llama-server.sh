@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install llama-server from Lemonade SDK (ROCm gfx1151 pre-built binaries)
-# Lemonade release b1321 — bundles its own ROCm 10.1 runtime, no system ROCm needed
+# Lemonade release b1337 — bundles its own ROCm 10.2 runtime, no system ROCm needed
 # Binary is labeled "ubuntu" but is standard Linux ELF (glibc 2.39+); works on Fedora 43 (glibc 2.43)
 
 set -e
@@ -18,7 +18,7 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $*"; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $*"; }
 log_setting() { echo -e "${CYAN}  ➜${NC} $*"; }
 
-RELEASE_TAG="b1328"
+RELEASE_TAG="b1337"
 DOWNLOAD_URL="https://github.com/lemonade-sdk/llamacpp-rocm/releases/download/${RELEASE_TAG}/llama-${RELEASE_TAG}-ubuntu-rocm-gfx1151-x64.zip"
 INSTALL_DIR="$HOME/AI/llama-server/bin"
 TMP_DIR="/tmp/lemonade-install-$$"
@@ -55,7 +55,15 @@ done
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$TMP_DIR"
 
-trap "rm -rf '$TMP_DIR'" EXIT
+SERVICE_UNIT="llama-server.service"
+SERVICE_WAS_RUNNING=0
+restart_service_if_needed() {
+    if [ "$SERVICE_WAS_RUNNING" = "1" ]; then
+        log_info "Restarting $SERVICE_UNIT ..."
+        systemctl --user start "$SERVICE_UNIT" || log_warning "Failed to restart $SERVICE_UNIT — start it manually."
+    fi
+}
+trap "rm -rf '$TMP_DIR'; restart_service_if_needed" EXIT
 
 ZIP_FILE="$TMP_DIR/lemonade.zip"
 
@@ -73,6 +81,14 @@ log_info "Extracting to $INSTALL_DIR ..."
 if ! unzip -o "$ZIP_FILE" -d "$TMP_DIR/extracted" > /dev/null; then
     log_error "Extraction failed!"
     exit 1
+fi
+
+# Stop the running service so the binaries aren't busy (avoids ETXTBSY on cp)
+if systemctl --user is-active --quiet "$SERVICE_UNIT" 2>/dev/null; then
+    log_info "Stopping $SERVICE_UNIT ..."
+    systemctl --user stop "$SERVICE_UNIT" || true
+    SERVICE_WAS_RUNNING=1
+    sleep 1
 fi
 
 # Copy all extracted files into bin dir
@@ -100,6 +116,13 @@ else
     log_error "llama-server binary not found after extraction. Check zip contents:"
     ls "$INSTALL_DIR/"
     exit 1
+fi
+
+# Bring the service back up if we stopped it
+if [ "$SERVICE_WAS_RUNNING" = "1" ]; then
+    log_info "Restarting $SERVICE_UNIT ..."
+    systemctl --user start "$SERVICE_UNIT" || log_warning "Failed to restart $SERVICE_UNIT — start it manually."
+    SERVICE_WAS_RUNNING=0
 fi
 
 echo
