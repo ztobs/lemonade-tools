@@ -776,7 +776,7 @@ case "$main_choice" in
         echo "    ngram-simple  — n-gram pattern matching"
         echo
         echo "  Types that need MTP heads built into the model:"
-        echo "    draft-mtp     — Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, Hy3"
+        echo "    draft-mtp     — Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, Hy3, Qwen3.8-Flash-Next"
         echo
         echo "  Types that need a separate draft model file:"
         echo "    draft-eagle3  — EAGLE3 head (best quality)"
@@ -793,6 +793,8 @@ case "$main_choice" in
             ini_set "$INI_FILE" "$section" "spec-draft-n-min" "${v:-2}"
             read -p "  draft-p-min (default: 0.75): " v
             ini_set "$INI_FILE" "$section" "draft-p-min" "${v:-0.75}"
+            read -p "  spec-draft-sampling (greedy/probabilistic, default: greedy): " v
+            [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-sampling" "$v"
             if [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ] || [ "$spec_type" = "draft-dflash" ] || [ "$spec_type" = "draft-dspark" ]; then
                 draft_interactive ""
                 case "$DRAFT_PATH" in
@@ -1210,7 +1212,7 @@ case "$edit_choice" in
         echo "    ngram-cache   — n-gram cache variant"
         echo
         echo "  Spec type options (needs MTP head in model — no draft file):"
-        echo "    draft-mtp     — Multi-Token Prediction (Qwen3.6, Qwopus, Gemma4, Step3.5/3.7, GLM-4.5/4.6, GLM-5.3-Flash, Qwen3.8-Flash-Next)"
+        echo "    draft-mtp     — Multi-Token Prediction (Qwen3.6, Qwopus, Gemma4, Step3.5/3.7, GLM-4.5/4.6, Qwen3.8-Flash-Next)"
         echo
         echo "  Spec type options (needs separate draft model via model-draft=):"
         echo "    draft-simple  — small standalone draft model"
@@ -1219,7 +1221,7 @@ case "$edit_choice" in
         echo "    draft-dspark  — Markov-head drafting (DSpark, experimental)"
         echo
         echo "  WARNING: 'draft-mtp' will CRASH the server if the model lacks MTP heads!"
-        echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, GLM-5.3-Flash, Qwen3.8-Flash-Next)"
+        echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, Qwen3.8-Flash-Next; GLM5-Next MTP not yet implemented)"
         echo
         read -p "  spec-type (blank=keep, 'none' to clear) [${spc:-(not set)}]: " v
         if [ -n "$v" ]; then
