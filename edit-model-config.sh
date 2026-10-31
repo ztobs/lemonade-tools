@@ -470,7 +470,90 @@ mmproj_interactive() {
     fi
 }
 
-# ── draft model helpers (for EAGLE3 / draft-simple) ──────────────────────────
+# ── menu-bound prompts (no free-text entry where a typo is destructive) ──────
+
+# Map a create-flow menu choice (number, or a literal type name) to a spec-type.
+# Prints the type, "INVALID" for an unrecognised entry, or nothing for skip.
+spec_type_from_choice() {
+    case "${1:-}" in
+        1) echo ngram-simple ;;
+        2) echo draft-mtp ;;
+        3) echo draft-eagle3 ;;
+        4) echo draft-simple ;;
+        5) echo draft-dflash ;;
+        6) echo draft-dspark ;;
+        ngram-simple|ngram-map-k|ngram-map-k4v|ngram-mod|ngram-cache|draft-mtp|draft-eagle3|draft-simple|draft-dflash|draft-dspark) echo "$1" ;;
+        S|s|"") : ;;
+        *) echo INVALID ;;
+    esac
+}
+
+# Map an edit-flow menu choice. Prints the type, "NONE" to clear, "INVALID",
+# or nothing to keep the current value.
+spec_type_from_edit_choice() {
+    case "${1:-}" in
+        1) echo ngram-simple ;;
+        2) echo ngram-map-k ;;
+        3) echo ngram-map-k4v ;;
+        4) echo ngram-mod ;;
+        5) echo ngram-cache ;;
+        6) echo draft-mtp ;;
+        7) echo draft-simple ;;
+        8) echo draft-eagle3 ;;
+        9) echo draft-dflash ;;
+        10) echo draft-dspark ;;
+        N|n) echo NONE ;;
+        K|k|"") : ;;
+        ngram-simple|ngram-map-k|ngram-map-k4v|ngram-mod|ngram-cache|draft-mtp|draft-eagle3|draft-simple|draft-dflash|draft-dspark) echo "$1" ;;
+        *) echo INVALID ;;
+    esac
+}
+
+# prompt_int LABEL DEFAULT MIN MAX -> prints a validated integer.
+# DEFAULT may be empty, in which case a blank answer prints nothing (keep).
+prompt_int() {
+    local label="$1" def="${2:-}" min="$3" max="$4" v shown
+    [ -n "$def" ] && shown="$def" || shown="keep"
+    while true; do
+        read -p "  $label (${min}-${max}, blank=${shown}): " v
+        if [ -z "$v" ]; then echo "$def"; return 0; fi
+        if [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge "$min" ] && [ "$v" -le "$max" ]; then
+            echo "$v"; return 0
+        fi
+        log_error "  Enter a whole number between ${min} and ${max}." >&2
+    done
+}
+
+# prompt_float01 LABEL DEFAULT -> prints a number in [0,1]; blank keeps DEFAULT
+prompt_float01() {
+    local label="$1" def="${2:-}" v shown ok
+    [ -n "$def" ] && shown="$def" || shown="keep"
+    while true; do
+        read -p "  $label (0-1, blank=${shown}): " v
+        if [ -z "$v" ]; then echo "$def"; return 0; fi
+        ok=$(awk -v x="$v" 'BEGIN{ if (x ~ /^[0-9]*\.?[0-9]+$/ && x+0 >= 0 && x+0 <= 1) print "y"; else print "n" }')
+        [ "$ok" = "y" ] && { echo "$v"; return 0; }
+        log_error "  Enter a number between 0 and 1." >&2
+    done
+}
+
+# prompt_sampling DEFAULT -> greedy | probabilistic | DEFAULT on blank
+prompt_sampling() {
+    local def="${1:-}" c shown
+    [ -n "$def" ] && shown="$def" || shown="keep"
+    echo "    [1] greedy   [2] probabilistic" >&2
+    while true; do
+        read -p "  spec-draft-sampling [${shown}]: " c
+        case "${c:-}" in
+            "") echo "$def"; return 0 ;;
+            1|[Gg]reedy) echo greedy; return 0 ;;
+            2|[Pp]robabilistic) echo probabilistic; return 0 ;;
+            *) log_error "  Enter 1 or 2." >&2 ;;
+        esac
+    done
+}
+
+# ── draft model helpers (EAGLE3 / draft-simple / MTP head files) ─────────────
 
 # List all *.gguf files in DRAFT_DIR with their index
 draft_list() {
@@ -521,7 +604,7 @@ draft_interactive() {
     DRAFT_PATH=""
 
     echo
-    log_header "Draft Model (EAGLE3 / draft-simple)"
+    log_header "Draft Model (EAGLE3 / draft-simple / MTP head file)"
     echo
     log_info "Draft models are stored in: $DRAFT_DIR"
     local count
@@ -533,6 +616,7 @@ draft_interactive() {
         echo
         echo "  [U] Enter a download URL for a new draft model"
         echo "  [1-${count}] Use an existing draft model from the list above"
+        echo "  [P] Enter an absolute path to a draft model file"
         [ -n "$current_draft" ] && echo "  [C] Keep current  ($(basename "$current_draft"))"
         echo "  [R] Remove draft from this config"
         echo "  [S] Skip / no change"
@@ -548,6 +632,17 @@ draft_interactive() {
                 fi
                 ;;
             [Rr]) DRAFT_PATH="__remove__"; return 0 ;;
+            [Pp])
+                read -p "  draft model absolute path: " dr_path
+                if [ -z "$dr_path" ]; then
+                    log_info "No path entered — skipping."; DRAFT_PATH="__skip__"; return 0
+                fi
+                if [ ! -f "$dr_path" ]; then
+                    log_error "File not found: $dr_path"; return 1
+                fi
+                log_success "Set to: $dr_path"
+                DRAFT_PATH="$dr_path"; return 0
+                ;;
             [Uu]) : ;;
             *)
                 if [[ "$dr_choice" =~ ^[0-9]+$ ]] && [ "$dr_choice" -ge 1 ] && [ "$dr_choice" -le "$count" ]; then
@@ -563,12 +658,24 @@ draft_interactive() {
         log_info "No draft models downloaded yet."
         echo
         echo "  [U] Enter a download URL"
+        echo "  [P] Enter an absolute path to a draft model file"
         echo "  [S] Skip (set up draft model later)"
         echo
         read -p "Choice [S]: " dr_choice
         case "${dr_choice:-S}" in
             [Ss]) DRAFT_PATH="__skip__"; return 0 ;;
             [Uu]) : ;;
+            [Pp])
+                read -p "  draft model absolute path: " dr_path
+                if [ -z "$dr_path" ]; then
+                    log_info "No path entered — skipping."; DRAFT_PATH="__skip__"; return 0
+                fi
+                if [ ! -f "$dr_path" ]; then
+                    log_error "File not found: $dr_path"; return 1
+                fi
+                log_success "Set to: $dr_path"
+                DRAFT_PATH="$dr_path"; return 0
+                ;;
             *)    DRAFT_PATH="__skip__"; return 0 ;;
         esac
     fi
@@ -772,34 +879,40 @@ case "$main_choice" in
         echo
         log_header "Speculative Decoding"
         echo
-        echo "  Types that work on ANY model (no extra files needed):"
-        echo "    ngram-simple  — n-gram pattern matching"
+        echo "  Speculative decoding:"
+        echo "    [1] ngram-simple  (any model, no extra files)"
+        echo "    [2] draft-mtp     (MTP head: embedded, or a separate mtp-*.gguf)"
+        echo "    [3] draft-eagle3  (EAGLE3 head file)"
+        echo "    [4] draft-simple  (small standalone draft model)"
+        echo "    [5] draft-dflash  (block-diffusion drafting, experimental)"
+        echo "    [6] draft-dspark  (Markov-head drafting, experimental)"
+        echo "    [S] skip (no speculative decoding)"
         echo
-        echo "  Types that need MTP heads built into the model:"
-        echo "    draft-mtp     — Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, Hy3, Qwen3.8-Flash-Next"
-        echo
-        echo "  Types that need a separate draft model file:"
-        echo "    draft-eagle3  — EAGLE3 head (best quality)"
-        echo "    draft-simple  — small standalone draft model"
-        echo "    draft-dflash  — block-diffusion drafting (DFlash, experimental)"
-        echo "    draft-dspark  — Markov-head drafting (DSpark, experimental)"
-        echo
-        read -p "  Enable? Enter type or leave blank to skip: " spec_type
+        read -p "  Choice [S]: " spec_choice
+        spec_type=$(spec_type_from_choice "$spec_choice")
+        if [ "$spec_type" = "INVALID" ]; then
+            log_warning "Unknown choice '$spec_choice' — skipping speculative decoding."
+            spec_type=""
+        fi
         if [ -n "$spec_type" ]; then
             ini_set "$INI_FILE" "$section" "spec-type" "$spec_type"
-            read -p "  spec-draft-n-max (default: 16): " v
-            ini_set "$INI_FILE" "$section" "spec-draft-n-max" "${v:-16}"
-            read -p "  spec-draft-n-min (default: 2): " v
-            ini_set "$INI_FILE" "$section" "spec-draft-n-min" "${v:-2}"
-            read -p "  draft-p-min (default: 0.75): " v
-            ini_set "$INI_FILE" "$section" "draft-p-min" "${v:-0.75}"
-            read -p "  spec-draft-sampling (greedy/probabilistic, default: greedy): " v
+            v=$(prompt_int "spec-draft-n-max" 16 1 32)
+            ini_set "$INI_FILE" "$section" "spec-draft-n-max" "$v"
+            v=$(prompt_int "spec-draft-n-min" 2 0 16)
+            ini_set "$INI_FILE" "$section" "spec-draft-n-min" "$v"
+            v=$(prompt_float01 "draft-p-min" 0.75)
+            ini_set "$INI_FILE" "$section" "draft-p-min" "$v"
+            v=$(prompt_sampling greedy)
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-sampling" "$v"
-            if [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ] || [ "$spec_type" = "draft-dflash" ] || [ "$spec_type" = "draft-dspark" ]; then
+            if [ "$spec_type" = "draft-mtp" ] || [ "$spec_type" = "draft-eagle3" ] || [ "$spec_type" = "draft-simple" ] || [ "$spec_type" = "draft-dflash" ] || [ "$spec_type" = "draft-dspark" ]; then
                 draft_interactive ""
                 case "$DRAFT_PATH" in
                     __skip__|"")
-                        log_warning "No draft model set — spec decoding may not work."
+                        if [ "$spec_type" = "draft-mtp" ]; then
+                            log_info "No draft file set — will use the MTP head embedded in the model, if it has one."
+                        else
+                            log_warning "No draft model set — spec decoding may not work."
+                        fi
                         ;;
                     __remove__)
                         : ;;
@@ -1204,26 +1317,26 @@ case "$edit_choice" in
         echo
         echo "  Current: spec-type=${spc:-(not set)}, spec-draft-n-max=${spn:-(not set)}, spec-draft-n-min=${spnmin:-(not set)}, draft-p-min=${dpm:-(not set)}, draft-p-split=${dps:-(not set)}, spec-draft-sampling=${sam:-(not set)}"
         echo
-        echo "  Spec type options (no draft model needed):"
-        echo "    ngram-simple  — n-gram pattern matching (works on ANY model)"
-        echo "    ngram-map-k   — n-gram map-k variant"
-        echo "    ngram-map-k4v — n-gram map-k4v variant"
-        echo "    ngram-mod     — n-gram mod variant"
-        echo "    ngram-cache   — n-gram cache variant"
+        echo "  Choose one:"
+        echo "    [1] ngram-simple    [2] ngram-map-k    [3] ngram-map-k4v"
+        echo "    [4] ngram-mod       [5] ngram-cache"
+        echo "    [6] draft-mtp       (MTP head: embedded, or a separate mtp-*.gguf)"
+        echo "    [7] draft-simple    [8] draft-eagle3"
+        echo "    [9] draft-dflash   [10] draft-dspark"
+        echo "    [N] none (clear speculative decoding)"
+        echo "    [K] keep current [${spc:-(not set)}]"
         echo
-        echo "  Spec type options (needs MTP head in model — no draft file):"
-        echo "    draft-mtp     — Multi-Token Prediction (Qwen3.6, Qwopus, Gemma4, Step3.5/3.7, GLM-4.5/4.6, Qwen3.8-Flash-Next)"
+        echo "  NOTE: draft-mtp needs an MTP-capable model; it will crash the server otherwise."
+        echo "        If the head ships as a separate mtp-*.gguf, attach it as model-draft."
         echo
-        echo "  Spec type options (needs separate draft model via model-draft=):"
-        echo "    draft-simple  — small standalone draft model"
-        echo "    draft-eagle3  — EAGLE3 head draft model (best quality)"
-        echo "    draft-dflash  — block-diffusion drafting (DFlash, experimental)"
-        echo "    draft-dspark  — Markov-head drafting (DSpark, experimental)"
-        echo
-        echo "  WARNING: 'draft-mtp' will CRASH the server if the model lacks MTP heads!"
-        echo "           Only enable it on MTP-capable models (Qwen3.6/Qwopus, Gemma4, Step3.5+, GLM-4.5+, Qwen3.8-Flash-Next; GLM5-Next MTP not yet implemented)"
-        echo
-        read -p "  spec-type (blank=keep, 'none' to clear) [${spc:-(not set)}]: " v
+        read -p "  Choice [K]: " spec_choice
+        v=$(spec_type_from_edit_choice "$spec_choice")
+        if [ "$v" = "INVALID" ]; then
+            log_warning "Unknown choice '$spec_choice' — keeping current spec-type."
+            v=""
+        elif [ "$v" = "NONE" ]; then
+            v="none"
+        fi
         if [ -n "$v" ]; then
             if [ "$v" = "none" ]; then
                 python3 - "$INI_FILE" "$section" << 'PY'
@@ -1243,27 +1356,29 @@ PY
             fi
         fi
         if [ "$v" != "none" ]; then
-            read -p "  spec-draft-n-max (blank=keep)  [${spn:-(not set)}]: " v
+            v=$(prompt_int "spec-draft-n-max" "$spn" 1 32)
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-n-max" "$v"
-            read -p "  spec-draft-n-min (blank=keep)  [${spnmin:-(not set)}]: " v
+            v=$(prompt_int "spec-draft-n-min" "$spnmin" 0 16)
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-n-min" "$v"
-            read -p "  draft-p-min      (blank=keep)  [${dpm:-(not set)}]: " v
+            v=$(prompt_float01 "draft-p-min" "$dpm")
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-min" "$v"
-            read -p "  draft-p-split    (blank=keep)  [${dps:-(not set)}]: " v
+            v=$(prompt_float01 "draft-p-split" "$dps")
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "draft-p-split" "$v"
-            echo "    spec-draft-sampling: greedy (argmax) or probabilistic (sample + rejection verify)"
-            echo "    Applies to draft-simple and draft-mtp. Default: greedy."
-            read -p "  spec-draft-sampling (greedy/probabilistic, blank=keep) [${sam:-(not set)}]: " v
+            echo "    spec-draft-sampling: 1 = greedy (argmax), 2 = probabilistic (sample + rejection verify)"
+            v=$(prompt_sampling "$sam")
             [ -n "$v" ] && ini_set "$INI_FILE" "$section" "spec-draft-sampling" "$v"
             
-            # If draft-eagle3 or draft-simple, offer to download/select a draft model
+            # Offer a draft file for every type that can take one. draft-mtp may
+            # have its head embedded in the model, or in a separate GGUF file.
             current_spec=$(ini_get "$INI_FILE" "$section" "spec-type" "")
-            if [ "$current_spec" = "draft-eagle3" ] || [ "$current_spec" = "draft-simple" ] || [ "$current_spec" = "draft-dflash" ] || [ "$current_spec" = "draft-dspark" ]; then
+            if [ "$current_spec" = "draft-mtp" ] || [ "$current_spec" = "draft-eagle3" ] || [ "$current_spec" = "draft-simple" ] || [ "$current_spec" = "draft-dflash" ] || [ "$current_spec" = "draft-dspark" ]; then
                 draft_interactive "$mdr"
                 case "$DRAFT_PATH" in
                     __skip__)
                         existing_mdr=$(ini_get "$INI_FILE" "$section" "model-draft" "")
-                        if [ -z "$existing_mdr" ]; then
+                        if [ -z "$existing_mdr" ] && [ "$current_spec" = "draft-mtp" ]; then
+                            log_info "No draft file set — will use the MTP head embedded in the model, if it has one."
+                        elif [ -z "$existing_mdr" ]; then
                             log_warning "draft-eagle3/draft-simple requires a draft model file!"
                             log_warning "No model-draft set and no download performed."
                             log_warning "Reverting spec-type to avoid broken config."
