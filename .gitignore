@@ -9,3 +9,9 @@ llama-server.log
 
 # Backup files
 *.bak
+
+# Local model storage (multi-GB GGUF downloads)
+models-audio/
+
+# Timestamped backups (*.bak alone does not match these)
+*.bak-*
